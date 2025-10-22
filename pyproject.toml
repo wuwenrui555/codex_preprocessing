@@ -1,0 +1,17 @@
+[project]
+name = "pycodex2"
+version = "0.1.0"
+description = "Co-detection by indexing (CODEX) analysis using Python, version 2"
+readme = "README.md"
+authors = [
+    {name = "Wenrui Wu",email = "wuwenruiwwr@outlook.com"},
+]
+requires-python = ">=3.10"
+dependencies = []
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
