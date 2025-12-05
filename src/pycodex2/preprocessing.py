@@ -13,6 +13,9 @@ from tqdm import tqdm
 from pycodex2.constants import TQDM_FORMAT
 
 
+################################################################################
+# Combine CSV Data Files into AnnData Object
+################################################################################
 def combine_csv_data(
     data_fs: List[Union[Path, str]],
     data_ids: List[str],
@@ -279,6 +282,9 @@ def _process_single_file(
     return adata
 
 
+################################################################################
+# Extreme Value Cutoff Detection and Filtering
+################################################################################
 class ExtremeCutoff:
     """
     A class for detecting and filtering extreme values using statistical methods.
