@@ -763,3 +763,108 @@ class ExtremeCutoff:
 
         index_keep = (self.values >= lower) & (self.values <= upper)
         return index_keep
+
+
+################################################################################
+# Nucleus Signal Normalization
+################################################################################
+def nucleus_signal_normalization(
+    adata: ad.AnnData,
+    col_data_id: str,
+    marker_nucleus: str = "DAPI",
+    method: str = "median",
+    inplace: bool = False,
+) -> Optional[ad.AnnData]:
+    """
+    Normalize single-cell expression data using nucleus marker signal intensity.
+
+    This function performs batch-wise normalization by dividing all marker intensities
+    by the central tendency (median or mean) of a nucleus marker (e.g., DAPI) within
+    each batch. This approach corrects for technical variation in overall signal
+    intensity across different batches or samples.
+
+    Parameters
+    ----------
+    adata : ad.AnnData
+        AnnData object containing single-cell expression data.
+    col_data_id : str
+        Column name in adata.obs that contains batch/sample identifiers for
+        grouping cells during normalization.
+    marker_nucleus : str, optional
+        Name of the nucleus marker in adata.var_names to use for normalization.
+        Default is "DAPI".
+    method : str, optional
+        Normalization method, either "median" or "mean". Determines which central
+        tendency measure to use for computing normalization factors. Default is "median".
+    inplace : bool, optional
+        If True, modify the input AnnData object in place. If False, return a
+        modified copy. Default is False.
+
+    Returns
+    -------
+    ad.AnnData or None
+        If inplace=False, returns a normalized copy of the input AnnData object.
+        If inplace=True, returns None and modifies the input object directly.
+        The output includes a new column 'nucleus_norm_factor' in adata.obs
+        containing the normalization factor applied to each cell.
+
+    Raises
+    ------
+    ValueError
+        If method is not "median" or "mean", if marker_nucleus is not found in
+        adata.var_names, or if multiple markers with the same name exist.
+
+    Examples
+    --------
+    >>> # Basic usage with default median normalization
+    >>> adata_norm = nucleus_signal_normalization(
+    ...     adata=adata,
+    ...     col_data_id='data_id',
+    ...     marker_nucleus='DAPI'
+    ... )
+    >>> print(adata_norm.obs['nucleus_norm_factor'].describe())
+
+    >>> # In-place normalization using mean
+    >>> nucleus_signal_normalization(
+    ...     adata=adata,
+    ...     col_data_id='batch',
+    ...     marker_nucleus='DAPI',
+    ...     method='mean',
+    ...     inplace=True
+    ... )
+    >>> print(adata.obs['nucleus_norm_factor'].head())
+
+    Notes
+    -----
+    - Normalization is performed separately for each unique value in col_data_id
+    - All marker intensities (adata.X) are divided by the normalization factor
+    - The normalization factor for each batch is stored in adata.obs['nucleus_norm_factor']
+    - Median normalization is generally more robust to outliers than mean normalization
+    """
+    if not inplace:
+        adata = adata.copy()
+
+    data_ids = adata.obs[col_data_id].unique()
+
+    if method not in ["median", "mean"]:
+        raise ValueError(
+            f"Normalization method must be 'median' or 'mean', got {method}."
+        )
+
+    norm_fun = np.median if method == "median" else np.mean
+
+    for data_id in tqdm(data_ids, desc="Nucleus Normalization", bar_format=TQDM_FORMAT):
+        mask = adata.obs[col_data_id] == data_id
+        marker_nucleus_idx = adata.var_names == marker_nucleus
+
+        if sum(marker_nucleus_idx) == 0:
+            raise ValueError(f"{marker_nucleus} not found in var_names")
+        elif sum(marker_nucleus_idx) > 1:
+            raise ValueError(f"Multiple {marker_nucleus} found in var_names")
+
+        norm_factor = norm_fun(adata.X[mask, marker_nucleus_idx])
+        adata.X[mask, :] /= norm_factor
+        adata.obs.loc[mask, "nucleus_norm_factor"] = norm_factor
+
+    if not inplace:
+        return adata
