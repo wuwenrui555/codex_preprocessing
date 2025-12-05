@@ -868,3 +868,287 @@ def nucleus_signal_normalization(
 
     if not inplace:
         return adata
+
+
+################################################################################
+# Arcsinh Transformation
+################################################################################
+def arcsinh_transformation(
+    adata: ad.AnnData,
+    cofactor: float = 1.0,
+    inplace: bool = False,
+) -> Optional[ad.AnnData]:
+    """
+    Apply arcsinh (inverse hyperbolic sine) transformation to expression data.
+
+    This function performs arcsinh transformation on the expression matrix, which
+    is commonly used in single-cell proteomics and flow cytometry data analysis
+    to stabilize variance and make data more normally distributed. The transformation
+    is defined as arcsinh(x / cofactor), where the cofactor controls the linearity
+    of the transformation for small values.
+
+    Parameters
+    ----------
+    adata : ad.AnnData
+        AnnData object containing single-cell expression data.
+    cofactor : float, optional
+        Cofactor (scaling factor) for the arcsinh transformation. Larger values
+        make the transformation more linear for small values, while smaller values
+        make it more log-like. Typical values range from 0.001 to 1000, depending
+        on the data scale. Default is 1.0.
+    inplace : bool, optional
+        If True, modify the input AnnData object in place. If False, return a
+        transformed copy. Default is False.
+
+    Returns
+    -------
+    ad.AnnData or None
+        If inplace=False, returns a transformed copy of the input AnnData object.
+        If inplace=True, returns None and modifies the input object directly.
+
+    Examples
+    --------
+    >>> # Basic usage with default cofactor
+    >>> adata_transformed = arcsinh_transformation(adata, cofactor=1.0)
+    >>> print(adata_transformed.X.min(), adata_transformed.X.max())
+
+    >>> # In-place transformation with custom cofactor
+    >>> arcsinh_transformation(adata, cofactor=5.0, inplace=True)
+    >>> print(adata.X[:5, :3])
+
+    >>> # Test different cofactors to find optimal value
+    >>> plot_arcsinh_transformation(
+    ...     adata,
+    ...     marker_name='CD3',
+    ...     cofactors=[0.1, 1, 10, 100]
+    ... )
+    >>> adata_transformed = arcsinh_transformation(adata, cofactor=5.0)
+
+    Notes
+    -----
+    - The arcsinh transformation is defined as: arcsinh(x / cofactor)
+    - Use plot_arcsinh_transformation() to visualize and select appropriate cofactor
+    """
+    if not inplace:
+        adata = adata.copy()
+
+    adata.X = np.arcsinh(adata.X / cofactor)
+
+    if not inplace:
+        return adata
+
+
+def plot_arcsinh_transformation(
+    adata: ad.AnnData,
+    marker_name: str,
+    cofactors: List[float] = None,
+    hue: Optional[str] = None,
+    legend: bool = True,
+    nrow: Optional[int] = None,
+    figsize_sub: Tuple[int, int] = (6, 4),
+    show: bool = True,
+    sample_size: Optional[int] = None,
+    seed: int = 81,
+    **kwargs,
+) -> Tuple[plt.Figure, np.ndarray]:
+    """
+    Visualize the effect of arcsinh transformation with different cofactors.
+
+    This function creates a grid of density plots showing how different cofactor
+    values affect the distribution of a specific marker. This is useful for
+    selecting an appropriate cofactor for the arcsinh transformation.
+
+    Parameters
+    ----------
+    adata : ad.AnnData
+        AnnData object containing single-cell expression data.
+    marker_name : str
+        Name of the marker in adata.var_names to visualize.
+    cofactors : list[float], optional
+        List of cofactor values to test. Default is [1000, 100, 10, 1, 0.1,
+        0.01, 0.001, 0.0001].
+    hue : str, optional
+        Column name in adata.obs to use for color grouping in density plots.
+        Useful for comparing distributions across batches or conditions.
+        Default is None, meaning no grouping.
+    legend : bool, optional
+        Whether to display legend when hue is specified. Default is True.
+    nrow : int, optional
+        Number of rows in the subplot grid. If None, automatically calculated
+        as the square root of the number of cofactors. Default is None.
+    figsize_sub : tuple[int, int], optional
+        Size of each individual subplot as (width, height). Default is (6, 4).
+    show : bool, optional
+        If True, display the plot. Default is True.
+    sample_size : int, optional
+        Number of cells to randomly sample for plotting. Useful for large datasets
+        to speed up visualization. If None, use all cells. Default is None.
+    seed : int, optional
+        Random seed for reproducible sampling when sample_size is specified.
+        Default is 81.
+    **kwargs
+        Additional keyword arguments passed to sns.kdeplot.
+
+    Returns
+    -------
+    tuple
+        (fig, axes) matplotlib figure and axes objects.
+
+    Raises
+    ------
+    ValueError
+        If marker_name is not found in adata.var_names, if multiple markers with
+        the same name exist, or if hue column is not found in adata.obs.
+
+    Examples
+    --------
+    >>> # Basic usage to compare different cofactors
+    >>> fig, axes = plot_arcsinh_transformation(
+    ...     adata,
+    ...     marker_name='CD3',
+    ...     cofactors=[1, 5, 10, 50]
+    ... )
+
+    >>> # Compare distributions across batches with custom layout
+    >>> fig, axes = plot_arcsinh_transformation(
+    ...     adata,
+    ...     marker_name='CD4',
+    ...     cofactors=[0.1, 1, 10, 100],
+    ...     hue='data_id',
+    ...     nrow=2,
+    ...     sample_size=10000
+    ... )
+    >>> fig.savefig('cd4_cofactor_comparison.png', dpi=300, bbox_inches='tight')
+
+    Notes
+    -----
+    - Smaller cofactors compress low values more (more log-like)
+    - Larger cofactors preserve linearity for small values
+    - Sampling is recommended for datasets with >100,000 cells to improve performance
+    - The title shows the cofactor value and sampling information if applicable
+    """
+    if cofactors is None:
+        cofactors = [1000, 100, 10, 1, 0.1, 0.01, 0.001, 0.0001]
+
+    # Calculate number of rows and columns
+    if nrow is None:
+        nrow = int(np.sqrt(len(cofactors)))
+    ncol = len(cofactors) // nrow + (1 if len(cofactors) % nrow != 0 else 0)
+
+    fig, axes = plt.subplots(
+        nrows=nrow,
+        ncols=ncol,
+        figsize=(figsize_sub[0] * ncol, figsize_sub[1] * nrow),
+    )
+    axes = axes.flatten()
+
+    # Hide unused subplots
+    for ax in axes[len(cofactors) :]:
+        ax.axis("off")
+
+    # Plot each cofactor
+    for i, cofactor in enumerate(cofactors):
+        _ax_kdeplot_arcsinh_transformation(
+            adata,
+            marker_name,
+            cofactor=cofactor,
+            hue=hue,
+            legend=legend,
+            ax=axes[i],
+            sample_size=sample_size,
+            seed=seed,
+            **kwargs,
+        )
+
+    fig.tight_layout()
+
+    if show:
+        plt.show()
+    else:
+        plt.close(fig)
+
+    return fig, axes
+
+
+def _ax_kdeplot_arcsinh_transformation(
+    adata: ad.AnnData,
+    marker_name: str,
+    cofactor: float = 1.0,
+    hue: Optional[str] = None,
+    title: Optional[str] = None,
+    legend: bool = True,
+    ax: Optional[plt.Axes] = None,
+    sample_size: Optional[int] = None,
+    seed: int = 81,
+    **kwargs,
+) -> None:
+    """
+    Helper function to plot arcsinh-transformed marker distribution on a single axis.
+
+
+    Parameters
+    ----------
+    adata : ad.AnnData
+        AnnData object containing single-cell expression data.
+    marker_name : str
+        Name of the marker in adata.var_names to visualize.
+    cofactor : float, optional
+        Cofactor for the arcsinh transformation. Default is 1.0.
+    hue : str, optional
+        Column name in adata.obs for color grouping. Default is None.
+    title : str, optional
+        Custom title for the plot. If None, automatically generated from
+        marker_name and cofactor. Default is None.
+    legend : bool, optional
+        Whether to display legend. Default is True.
+    ax : matplotlib.axes.Axes, optional
+        Axes object to plot on. If None, uses current axes. Default is None.
+    sample_size : int, optional
+        Number of cells to randomly sample. If None, use all cells. Default is None.
+    seed : int, optional
+        Random seed for sampling. Default is 81.
+    **kwargs
+        Additional keyword arguments passed to sns.kdeplot.
+
+    Raises
+    ------
+    ValueError
+        If marker_name is not found in adata.var_names, if multiple markers with
+        the same name exist, or if hue column is not found in adata.obs.
+    """
+    if ax is None:
+        ax = plt.gca()
+
+    if title is None:
+        title = f"{marker_name}, cofactor={cofactor}"
+
+    # Validate marker exists
+    if sum(adata.var_names == marker_name) == 0:
+        raise ValueError(f"{marker_name} not found in var_names")
+    if sum(adata.var_names == marker_name) > 1:
+        raise ValueError(f"Multiple {marker_name} found in var_names")
+
+    # Validate hue column
+    if hue is not None and hue not in adata.obs.columns:
+        raise ValueError(f"{hue} not found in obs columns")
+
+    # Downsample if requested
+    if sample_size is not None and adata.n_obs > sample_size:
+        title = (
+            title + f", downsampled={sample_size:.1e} ({sample_size / adata.n_obs:.2f})"
+        )
+
+        np.random.seed(seed)
+        sampled_indices = np.random.choice(adata.n_obs, size=sample_size, replace=False)
+        adata = adata[sampled_indices]
+
+    # Create KDE plot
+    sns.kdeplot(
+        x=np.arcsinh(adata[:, marker_name].X.flatten() / cofactor),
+        hue=adata.obs[hue] if hue is not None else None,
+        legend=legend,
+        ax=ax,
+        **kwargs,
+    )
+    ax.set_xlabel(f"arcsinh({marker_name} / {cofactor})")
+    ax.set_title(title)
