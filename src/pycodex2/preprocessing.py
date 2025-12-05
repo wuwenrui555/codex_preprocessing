@@ -558,12 +558,19 @@ class ExtremeCutoff:
                         f"{method}",
                         f"{lower:.2f} ({perc_filtered_lower:.3g}%)",
                         f"{upper:.2f} ({perc_filtered_upper:.3g}%)",
+                        f"{lower + upper:.2f} ({perc_filtered_lower + perc_filtered_upper:.3g}%)",
                     )
                 )
 
         results_df = pd.DataFrame(
             results,
-            columns=["N Sigma", "Method", "Lower (Filtered%)", "Upper (Filtered%)"],
+            columns=[
+                "N Sigma",
+                "Method",
+                "Lower (Filtered%)",
+                "Upper (Filtered%)",
+                "Total (Filtered%)",
+            ],
         )
 
         if return_df:
@@ -573,7 +580,7 @@ class ExtremeCutoff:
             results_df.to_markdown(
                 index=False,
                 tablefmt="psql",
-                colalign=("center", "center", "right", "right"),
+                colalign=("center", "center", "right", "right", "right"),
             )
         )
 
