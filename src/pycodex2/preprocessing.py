@@ -719,15 +719,40 @@ class ExtremeCutoff:
             _,
             lower,
             upper,
-            _,
-            _,
-            _,
-            _,
+            n_filtered_lower,
+            n_filtered_upper,
+            perc_filtered_lower,
+            perc_filtered_upper,
         ) = self._calculate_statistics(
             method=method,
             n_sigma=n_sigma,
             n_sigma_lower=n_sigma_lower,
             n_sigma_upper=n_sigma_upper,
         )
+
+        result_df = pd.DataFrame(
+            {
+                "Threshold": ["Lower", "Upper", "Total"],
+                "Cutoff": [f"{lower:.2f}", f"{upper:.2f}", ""],
+                "Filtered": [
+                    f"{n_filtered_lower:,}",
+                    f"{n_filtered_upper:,}",
+                    f"{n_filtered_lower + n_filtered_upper:,}",
+                ],
+                "Filtered(%)": [
+                    f"{perc_filtered_lower:.3g}%",
+                    f"{perc_filtered_upper:.3g}%",
+                    f"{perc_filtered_lower + perc_filtered_upper:.3g}%",
+                ],
+            }
+        )
+        print(
+            result_df.to_markdown(
+                index=False,
+                tablefmt="psql",
+                colalign=("center", "right", "right", "right"),
+            )
+        )
+
         index_keep = (self.values >= lower) & (self.values <= upper)
         return index_keep
