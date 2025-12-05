@@ -1,7 +1,7 @@
 # %%
 import warnings
 from pathlib import Path
-from typing import List, Tuple, Union
+from typing import Dict, List, Optional, Tuple, Union
 
 import anndata as ad
 import matplotlib.pyplot as plt
@@ -14,61 +14,269 @@ from pycodex2.constants import TQDM_FORMAT
 
 
 def combine_csv_data(
-    data_fs: list[Union[Path, str]],
-    data_ids: list[str],
-    marker_names: list[str],
-    rename_dict: dict = None,
+    data_fs: List[Union[Path, str]],
+    data_ids: List[str],
+    marker_names: List[str],
+    rename_dict: Optional[Dict[str, str]] = None,
     col_cell_id: str = "cell_id",
     col_data_id: str = "data_id",
+    validate_markers: bool = True,
 ) -> ad.AnnData:
     """
     Combine multiple CSV data files into a single AnnData object.
 
+    This function reads multiple CSV files, standardizes their format, and combines
+    them into a single AnnData object suitable for single-cell analysis. Each cell
+    is assigned a unique identifier based on its data source and original cell ID.
+
     Parameters
     ----------
-    data_fs : list[Union[Path, str]]
+    data_fs : List[Union[Path, str]]
         List of file paths to the CSV data files.
-    data_ids : list[str]
-        List of identifiers corresponding to each data file.
-    marker_names : list[str]
-        List of marker names to be used as features.
-    rename_dict : dict, optional
-        Dictionary for renaming columns in the data files.
+    data_ids : List[str]
+        List of identifiers corresponding to each data file. Must be unique and
+        have the same length as data_fs.
+    marker_names : List[str]
+        List of marker names to be used as features (columns in the expression matrix).
+    rename_dict : Dict[str, str], optional
+        Dictionary for renaming columns in the data files before processing.
+        Example: {'old_name': 'new_name'}. Default is None.
     col_cell_id : str, optional
-        Column name for cell identifiers.
+        Column name for cell identifiers in the input CSV files. Default is "cell_id".
     col_data_id : str, optional
-        Column name for data identifiers.
+        Column name for data identifiers in the output AnnData.obs. Default is "data_id".
+    validate_markers : bool, optional
+        Whether to validate that all marker_names exist in each file. Default is True.
 
     Returns
     -------
     ad.AnnData
-        Combined AnnData object.
+        Combined AnnData object with:
+        - X: Expression matrix with marker_names as columns
+        - obs: Metadata with unique cell indices and data_id column
+        - var: Feature names (marker_names)
+
+    Raises
+    ------
+    ValueError
+        If input lists have mismatched lengths, contain duplicates, or if required
+        columns are missing from CSV files.
+    FileNotFoundError
+        If any of the specified CSV files do not exist.
+
+    Examples
+    --------
+    >>> # Basic usage
+    >>> adata = combine_csv_data(
+    ...     data_fs=['sample1.csv', 'sample2.csv'],
+    ...     data_ids=['S1', 'S2'],
+    ...     marker_names=['CD3', 'CD4', 'CD8']
+    ... )
+    >>> print(adata)
+    >>> print(adata.obs['data_id'].value_counts())
+
+    >>> # With column renaming
+    >>> adata = combine_csv_data(
+    ...     data_fs=['data1.csv', 'data2.csv'],
+    ...     data_ids=['batch1', 'batch2'],
+    ...     marker_names=['marker1', 'marker2'],
+    ...     rename_dict={'old_marker1': 'marker1', 'old_marker2': 'marker2'}
+    ... )
+
+    Notes
+    -----
+    - Cell indices in the output are formatted as '{data_id}_c{cell_id}'
+    - All columns except marker_names are stored in adata.obs
+    - If a marker is missing after renaming, a ValueError is raised
     """
+    # Input validation
+    _validate_inputs(data_fs, data_ids, marker_names, col_cell_id, col_data_id)
+
     adata_list = []
 
-    for data_f, data_id in tqdm(
+    # Set up iterator
+    iterator = tqdm(
         zip(data_fs, data_ids),
         desc="Reading data",
         bar_format=TQDM_FORMAT,
         total=len(data_fs),
-    ):
-        data = pd.read_csv(data_f)
+    )
 
-        if rename_dict is not None:
-            data = data.rename(columns=rename_dict)
+    # Process each file
+    for data_f, data_id in iterator:
+        try:
+            adata = _process_single_file(
+                data_f=data_f,
+                data_id=data_id,
+                marker_names=marker_names,
+                rename_dict=rename_dict,
+                col_cell_id=col_cell_id,
+                col_data_id=col_data_id,
+                validate_markers=validate_markers,
+            )
+            adata_list.append(adata)
+        except Exception as e:
+            raise RuntimeError(
+                f"Error processing file '{data_f}' (data_id: '{data_id}'): {str(e)}"
+            ) from e
 
-        data["index"] = [f"{data_id}_c{i}" for i in data[col_cell_id]]
-        data[col_data_id] = data_id
-
-        data_X = data[["index"] + marker_names].set_index("index")
-        data_meta = data.drop(columns=marker_names).set_index("index")
-
-        adata = ad.AnnData(X=data_X, obs=data_meta)
-        adata_list.append(adata)
-
-    adata_combined = ad.concat(adata_list)
+    # Combine all AnnData objects
+    try:
+        adata_combined = ad.concat(adata_list, join="outer", merge="same")
+    except Exception as e:
+        raise RuntimeError(f"Error combining AnnData objects: {str(e)}") from e
 
     return adata_combined
+
+
+def _validate_inputs(
+    data_fs: List[Union[Path, str]],
+    data_ids: List[str],
+    marker_names: List[str],
+    col_cell_id: str,
+    col_data_id: str,
+) -> None:
+    """Validate input parameters."""
+    # Check empty inputs
+    if not data_fs:
+        raise ValueError("data_fs cannot be empty.")
+    if not data_ids:
+        raise ValueError("data_ids cannot be empty.")
+    if not marker_names:
+        raise ValueError("marker_names cannot be empty.")
+
+    # Check length match
+    if len(data_fs) != len(data_ids):
+        raise ValueError(
+            f"Length of data_fs ({len(data_fs)}) must match "
+            f"length of data_ids ({len(data_ids)})."
+        )
+
+    # Check for duplicate data_ids
+    if len(data_ids) != len(set(data_ids)):
+        duplicates = [id for id in data_ids if data_ids.count(id) > 1]
+        raise ValueError(f"data_ids contains duplicates: {set(duplicates)}")
+
+    # Check file existence
+    for data_f in data_fs:
+        path = Path(data_f)
+        if not path.exists():
+            raise FileNotFoundError(f"File not found: {data_f}")
+        if not path.is_file():
+            raise ValueError(f"Path is not a file: {data_f}")
+
+    # Check for invalid column names
+    if not col_cell_id:
+        raise ValueError("col_cell_id cannot be empty.")
+    if not col_data_id:
+        raise ValueError("col_data_id cannot be empty.")
+
+    # Check marker_names validity
+    if len(marker_names) != len(set(marker_names)):
+        duplicates = [m for m in marker_names if marker_names.count(m) > 1]
+        raise ValueError(f"marker_names contains duplicates: {set(duplicates)}")
+
+
+def _process_single_file(
+    data_f: Union[Path, str],
+    data_id: str,
+    marker_names: List[str],
+    rename_dict: Optional[Dict[str, str]],
+    col_cell_id: str,
+    col_data_id: str,
+    validate_markers: bool,
+) -> ad.AnnData:
+    """Process a single CSV file and return an AnnData object."""
+    # Read CSV
+    try:
+        data = pd.read_csv(data_f)
+    except Exception as e:
+        raise ValueError(f"Failed to read CSV file: {str(e)}") from e
+
+    if data.empty:
+        raise ValueError(f"CSV file is empty: {data_f}")
+
+    # Rename columns if needed
+    if rename_dict is not None:
+        data = data.rename(columns=rename_dict)
+
+    # Validate required columns
+    if col_cell_id not in data.columns:
+        raise ValueError(
+            f"Column '{col_cell_id}' not found in {data_f}. "
+            f"Available columns: {list(data.columns)}"
+        )
+
+    # Check for duplicate cell IDs
+    if data[col_cell_id].duplicated().any():
+        n_duplicates = data[col_cell_id].duplicated().sum()
+        warnings.warn(
+            f"Found {n_duplicates} duplicate cell IDs in {data_f} (data_id: {data_id}). "
+            f"This may cause unexpected behavior.",
+            UserWarning,
+        )
+
+    # Validate markers
+    if validate_markers:
+        missing_markers = set(marker_names) - set(data.columns)
+        if missing_markers:
+            raise ValueError(
+                f"Missing markers {missing_markers} in {data_f}. "
+                f"Available columns: {list(data.columns)}"
+            )
+    else:
+        # Only warn about missing markers
+        missing_markers = set(marker_names) - set(data.columns)
+        if missing_markers:
+            warnings.warn(
+                f"Missing markers {missing_markers} in {data_f}. "
+                f"These will be filled with NaN.",
+                UserWarning,
+            )
+
+    # Check for potential column conflicts
+    if "index" in data.columns:
+        warnings.warn(
+            f"Column 'index' already exists in {data_f} and will be overwritten.",
+            UserWarning,
+        )
+
+    # Create unique cell index
+    data["index"] = [f"{data_id}_c{cell_id}" for cell_id in data[col_cell_id]]
+
+    # Check for duplicate indices (shouldn't happen if cell_ids are unique per file)
+    if data["index"].duplicated().any():
+        raise ValueError(
+            f"Duplicate indices created for {data_f}. "
+            f"This usually indicates duplicate cell IDs in the file."
+        )
+
+    # Add data_id column
+    if col_data_id in data.columns and col_data_id != "index":
+        warnings.warn(
+            f"Column '{col_data_id}' already exists in {data_f} and will be overwritten.",
+            UserWarning,
+        )
+    data[col_data_id] = data_id
+
+    # Split into expression matrix and metadata
+    # Handle missing markers by using reindex
+    available_markers = [m for m in marker_names if m in data.columns]
+    data_X = data[["index"] + available_markers].set_index("index")
+
+    # Reindex to include all markers (missing ones will be NaN)
+    data_X = data_X.reindex(columns=marker_names)
+
+    # Create metadata (exclude marker columns)
+    meta_columns = [col for col in data.columns if col not in marker_names]
+    data_meta = data[meta_columns].set_index("index")
+
+    # Create AnnData object
+    adata = ad.AnnData(
+        X=data_X.values, obs=data_meta, var=pd.DataFrame(index=marker_names)
+    )
+
+    return adata
 
 
 class ExtremeCutoff:
