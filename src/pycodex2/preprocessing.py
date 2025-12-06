@@ -1303,30 +1303,33 @@ def quantile_normalization(
 
 def plot_quantile_normalization(
     adata: ad.AnnData,
-    marker_name: str,
+    marker_names: Union[str, List[str]],
     quantiles: List[float] = None,
     sample_size: Optional[int] = None,
     seed: int = 81,
     linewidth: Union[int, float] = 1,
-    figsize: Tuple[int, int] = (6, 4),
     show: bool = True,
-) -> Tuple[plt.Figure, plt.Axes]:
+    legend: bool = True,
+    nrow: Optional[int] = None,
+    figsize_sub: Tuple[int, int] = (6, 4),
+) -> Tuple[plt.Figure, Union[plt.Axes, np.ndarray]]:
     """
-    Visualize quantile cutoff positions on marker distribution.
+    Visualize quantile cutoff positions on marker distributions.
 
-    This function creates a density plot showing the distribution of a marker
-    with vertical lines indicating the positions of specified quantiles. This
-    is useful for selecting appropriate quantile thresholds for normalization.
+    This function creates density plots showing the distribution of one or more
+    markers with vertical lines indicating the positions of specified quantiles.
+    This is useful for selecting appropriate quantile thresholds for normalization.
 
     Parameters
     ----------
     adata : ad.AnnData
         AnnData object containing single-cell expression data.
-    marker_name : str
-        Name of the marker in adata.var_names to visualize.
+    marker_names : str or list[str]
+        Name(s) of marker(s) in adata.var_names to visualize. Can be a single
+        marker name as a string or a list of marker names.
     quantiles : list[float], optional
         List of quantile values (between 0 and 1) to display as vertical lines.
-        Default is [0.005, 0.01, 0.05, 0.95, 0.99, 0.995].
+        Default is [0.001, 0.005, 0.01, 0.05, 0.95, 0.99, 0.995, 0.999].
     sample_size : int, optional
         Number of cells to randomly sample for plotting. Useful for large datasets
         to speed up visualization. If None, use all cells. Default is None.
@@ -1335,78 +1338,131 @@ def plot_quantile_normalization(
         Default is 81.
     linewidth : int or float, optional
         Width of the quantile threshold lines. Default is 1.
-    figsize : tuple[int, int], optional
-        Figure size as (width, height). Default is (6, 4).
     show : bool, optional
         If True, display the plot. If False, close the plot and return the
         figure object. Default is True.
+    legend : bool, optional
+        Whether to display legend with quantile values. Default is True.
+    nrow : int, optional
+        Number of rows in the subplot grid when plotting multiple markers.
+        If None, automatically calculated as the square root of the number
+        of markers. Default is None.
+    figsize_sub : tuple[int, int], optional
+        Size of each individual subplot as (width, height). Default is (6, 4).
 
     Returns
     -------
     tuple
-        (fig, ax) matplotlib figure and axes objects.
+        (fig, axes) matplotlib figure and axes objects. When plotting a single
+        marker, axes is a single Axes object. When plotting multiple markers,
+        axes is a numpy array of Axes objects.
 
     Raises
     ------
     ValueError
-        If marker_name is not found in adata.var_names or if multiple markers
+        If any marker_name is not found in adata.var_names or if multiple markers
         with the same name exist.
 
     Examples
     --------
-    >>> # Basic usage to visualize default quantiles
-    >>> fig, ax = plot_quantile_normalization(adata, marker_name='CD3')
+    >>> # Single marker visualization
+    >>> fig, ax = plot_quantile_normalization(adata, marker_names='CD3')
 
-    >>> # Custom quantiles with sampling for large dataset
-    >>> fig, ax = plot_quantile_normalization(
+    >>> # Multiple markers with custom quantiles
+    >>> fig, axes = plot_quantile_normalization(
     ...     adata,
-    ...     marker_name='CD4',
-    ...     quantiles=[0.01, 0.05, 0.5, 0.95, 0.99],
+    ...     marker_names=['CD3', 'CD4', 'CD8', 'CD45'],
+    ...     quantiles=[0.01, 0.05, 0.95, 0.99],
     ...     sample_size=50000
     ... )
-    >>> fig.savefig('cd4_quantiles.png', dpi=300, bbox_inches='tight')
 
     Notes
     -----
     - Quantile lines show both the quantile value and the actual data value
     - Sampling is recommended for datasets with >100,000 cells to improve performance
     - Use this plot to identify appropriate quantile thresholds before normalization
+    - For single marker plots, axes is returned as a single object, not an array
     """
     if quantiles is None:
-        quantiles = [0.005, 0.01, 0.05, 0.95, 0.99, 0.995]
+        quantiles = [0.001, 0.005, 0.01, 0.05, 0.95, 0.99, 0.995, 0.999]
 
-    # Validate marker exists
-    if sum(adata.var_names == marker_name) == 0:
-        raise ValueError(f"{marker_name} not found in var_names")
+    # Validate quantiles is a list
+    if not isinstance(quantiles, list):
+        raise ValueError(
+            "quantiles must be a list of quantile values, "
+            f"got {type(quantiles).__name__}"
+        )
 
-    if sum(adata.var_names == marker_name) > 1:
-        raise ValueError(f"Multiple {marker_name} found in var_names")
+    # Convert single marker to list for uniform processing
+    if isinstance(marker_names, str):
+        marker_names = [marker_names]
+
+    # Validate marker_names is a list
+    if not isinstance(marker_names, list):
+        raise ValueError(
+            "marker_names must be a string or list of strings, "
+            f"got {type(marker_names).__name__}"
+        )
+
+    # Validate all markers exist
+    for marker_name in marker_names:
+        if sum(adata.var_names == marker_name) == 0:
+            raise ValueError(f"{marker_name} not found in var_names")
+
+        if sum(adata.var_names == marker_name) > 1:
+            raise ValueError(f"Multiple {marker_name} found in var_names")
+
+    # Calculate grid dimensions
+    n_markers = len(marker_names)
+    if nrow is None:
+        nrow = int(np.sqrt(n_markers))
+    ncol = n_markers // nrow + (1 if n_markers % nrow != 0 else 0)
 
     # Downsample if requested
     if sample_size is not None and sample_size < adata.n_obs:
         adata = _downsample_cells(adata, sample_size=sample_size, seed=seed)
 
-    # Extract marker values
-    x = adata[:, marker_name].X.flatten()
+    # Create subplots
+    fig, axes = plt.subplots(
+        nrows=nrow,
+        ncols=ncol,
+        figsize=(figsize_sub[0] * ncol, figsize_sub[1] * nrow),
+        squeeze=False,  # Always return 2D array for consistent indexing
+    )
+    axes_flat = axes.flatten()
 
-    # Create plot
-    fig, ax = plt.subplots(figsize=figsize)
-    sns.kdeplot(x, ax=ax)
+    # Hide unused subplots
+    for i in range(n_markers, len(axes_flat)):
+        axes_flat[i].axis("off")
 
-    # Plot quantile lines
-    for quantile, color in zip(quantiles, sns.color_palette(n_colors=len(quantiles))):
-        v_quantile = np.quantile(x, quantile)
-        ax.axvline(
-            v_quantile,
-            color=color,
-            linestyle="--",
-            label=f"{quantile} ({v_quantile:.3g})",
-            linewidth=linewidth,
-        )
+    # Plot each marker
+    for i, marker_name in enumerate(marker_names):
+        ax = axes_flat[i]
 
-    ax.set_xlabel(marker_name)
-    ax.set_ylabel("Density")
-    ax.legend(title="Quantiles (Values)", loc="best")
+        # Extract marker values
+        x = adata[:, marker_name].X.flatten()
+
+        # Plot density
+        sns.kdeplot(x=x, ax=ax)
+
+        # Plot quantile lines
+        for quantile, color in zip(
+            quantiles, sns.color_palette(n_colors=len(quantiles))
+        ):
+            v_quantile = np.quantile(x, quantile)
+            ax.axvline(
+                v_quantile,
+                color=color,
+                linestyle="--",
+                label=f"{quantile} ({v_quantile:.3g})",
+                linewidth=linewidth,
+            )
+
+        ax.set_xlabel(marker_name)
+        ax.set_ylabel("Density")
+
+        if legend:
+            ax.legend(title="Quantiles (Values)", loc="best", fontsize="small")
 
     fig.tight_layout()
 
@@ -1415,4 +1471,8 @@ def plot_quantile_normalization(
     else:
         plt.close(fig)
 
-    return fig, ax
+    # Return single axes for single marker, array for multiple markers
+    if n_markers == 1:
+        return fig, axes_flat[0]
+    else:
+        return fig, axes_flat[:n_markers]
