@@ -941,7 +941,7 @@ def arcsinh_transformation(
 def plot_arcsinh_transformation(
     adata: ad.AnnData,
     marker_name: str,
-    cofactors: List[float] = None,
+    cofactors: Union[List[float], int, float] = None,
     hue: Optional[str] = None,
     legend: bool = True,
     nrow: Optional[int] = None,
@@ -964,9 +964,10 @@ def plot_arcsinh_transformation(
         AnnData object containing single-cell expression data.
     marker_name : str
         Name of the marker in adata.var_names to visualize.
-    cofactors : list[float], optional
+    cofactors : list[float] or int or float, optional
         List of cofactor values to test. Default is [1000, 100, 10, 1, 0.1,
-        0.01, 0.001, 0.0001].
+        0.01, 0.001, 0.0001]. If a single int or float is provided, it will be
+        converted to a list with one element.
     hue : str, optional
         Column name in adata.obs to use for color grouping in density plots.
         Useful for comparing distributions across batches or conditions.
@@ -1030,31 +1031,37 @@ def plot_arcsinh_transformation(
     if cofactors is None:
         cofactors = [1000, 100, 10, 1, 0.1, 0.01, 0.001, 0.0001]
 
-    # Calculate number of rows and columns
+    if isinstance(cofactors, (int, float)):
+        cofactors = [cofactors]
+
+    # Calculate grid dimensions
+    n_cofactors = len(cofactors)
     if nrow is None:
-        nrow = int(np.sqrt(len(cofactors)))
-    ncol = len(cofactors) // nrow + (1 if len(cofactors) % nrow != 0 else 0)
+        nrow = int(np.sqrt(n_cofactors))
+    ncol = n_cofactors // nrow + (1 if n_cofactors % nrow != 0 else 0)
 
     fig, axes = plt.subplots(
         nrows=nrow,
         ncols=ncol,
         figsize=(figsize_sub[0] * ncol, figsize_sub[1] * nrow),
+        squeeze=False,
     )
-    axes = axes.flatten()
+    axes_flat = axes.flatten()
 
     # Hide unused subplots
-    for ax in axes[len(cofactors) :]:
-        ax.axis("off")
+    for i in range(n_cofactors, len(axes_flat)):
+        axes_flat[i].axis("off")
 
     # Plot each cofactor
     for i, cofactor in enumerate(cofactors):
+        ax = axes_flat[i]
         _ax_kdeplot_arcsinh_transformation(
             adata,
             marker_name,
             cofactor=cofactor,
             hue=hue,
             legend=legend,
-            ax=axes[i],
+            ax=ax,
             sample_size=sample_size,
             seed=seed,
             **kwargs,
@@ -1067,7 +1074,11 @@ def plot_arcsinh_transformation(
     else:
         plt.close(fig)
 
-    return fig, axes
+    # Return single axes if only one cofactor, array for multiple cofactors
+    if n_cofactors == 1:
+        return fig, axes_flat[0]
+    else:
+        return fig, axes_flat[:n_cofactors]
 
 
 def _ax_kdeplot_arcsinh_transformation(
@@ -1143,10 +1154,17 @@ def _ax_kdeplot_arcsinh_transformation(
     sns.kdeplot(
         x=np.arcsinh(adata[:, marker_name].X.flatten() / cofactor),
         hue=adata.obs[hue] if hue is not None else None,
-        legend=legend,
+        legend=legend and (hue is not None),
         ax=ax,
         **kwargs,
     )
+    if legend and (hue is not None):
+        leg = ax.get_legend()
+        leg.set_title(hue)
+        leg.set_loc("best")
+        for text in leg.get_texts():
+            text.set_fontsize("small")
+
     ax.set_xlabel(f"arcsinh({marker_name} / {cofactor})")
     ax.set_title(title)
 
