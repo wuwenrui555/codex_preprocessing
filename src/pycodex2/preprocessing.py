@@ -1137,10 +1137,7 @@ def _ax_kdeplot_arcsinh_transformation(
         title = (
             title + f", downsampled={sample_size:.1e} ({sample_size / adata.n_obs:.2f})"
         )
-
-        np.random.seed(seed)
-        sampled_indices = np.random.choice(adata.n_obs, size=sample_size, replace=False)
-        adata = adata[sampled_indices]
+        adata = _downsample_cells(adata, sample_size=sample_size, seed=seed)
 
     # Create KDE plot
     sns.kdeplot(
@@ -1152,3 +1149,42 @@ def _ax_kdeplot_arcsinh_transformation(
     )
     ax.set_xlabel(f"arcsinh({marker_name} / {cofactor})")
     ax.set_title(title)
+
+
+def _downsample_cells(
+    adata: ad.AnnData,
+    sample_size: int,
+    replace: bool = False,
+    seed: int = 81,
+) -> ad.AnnData:
+    """
+    Randomly downsample cells from an AnnData object.
+
+    Parameters
+    ----------
+    adata : ad.AnnData
+        AnnData object containing single-cell expression data.
+    sample_size : int
+        Number of cells to randomly sample.
+    replace : bool, optional
+        Whether to sample with replacement. Default is False.
+    seed : int, optional
+        Random seed for reproducible sampling. Default is 81.
+
+    Returns
+    -------
+    ad.AnnData
+        A new AnnData object containing the sampled subset of cells.
+        If sample_size >= adata.n_obs, returns the original adata unchanged.
+
+    Examples
+    --------
+    >>> adata_small = _downsample_cells(adata, sample_size=10000)
+    >>> print(f"Original: {adata.n_obs}, Downsampled: {adata_small.n_obs}")
+    """
+    if sample_size >= adata.n_obs:
+        return adata
+
+    np.random.seed(seed)
+    sampled_indices = np.random.choice(adata.n_obs, size=sample_size, replace=replace)
+    return adata[sampled_indices]
