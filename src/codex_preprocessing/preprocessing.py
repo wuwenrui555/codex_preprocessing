@@ -10,7 +10,7 @@ import pandas as pd
 import seaborn as sns
 from tqdm import tqdm
 
-from pycodex2.constants import TQDM_FORMAT
+from codex_preprocessing.constants import TQDM_FORMAT
 
 
 ################################################################################
