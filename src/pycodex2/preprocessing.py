@@ -14,6 +14,177 @@ from pycodex2.constants import TQDM_FORMAT
 
 
 ################################################################################
+# Processing History Tracking Helpers
+################################################################################
+def _record_processing_step(
+    adata: ad.AnnData,
+    step_name: str,
+    parameters: Dict[str, any],
+) -> None:
+    """
+    Record a processing step to the AnnData object's processing history.
+
+    This function adds a new entry to adata.uns['processing_history'] containing
+    the step name, timestamp, and parameters used. This allows tracking of all
+    transformations applied to the data.
+
+    Parameters
+    ----------
+    adata : ad.AnnData
+        AnnData object to record the processing step in.
+    step_name : str
+        Name of the processing step (e.g., 'nucleus_signal_normalization').
+    parameters : dict
+        Dictionary of parameters used for this processing step.
+
+    Returns
+    -------
+    None
+        Modifies adata.uns['processing_history'] in place.
+
+    Examples
+    --------
+    >>> _record_processing_step(
+    ...     adata,
+    ...     'arcsinh_transformation',
+    ...     {'cofactor': 5.0}
+    ... )
+    >>> print(adata.uns['processing_history'])
+    """
+    # Initialize processing history if it doesn't exist
+    if "processing_history" not in adata.uns:
+        adata.uns["processing_history"] = []
+
+    # Create step entry
+    step_entry = {
+        "step": step_name,
+        "timestamp": pd.Timestamp.now().isoformat(),
+        "parameters": parameters,
+    }
+
+    # Append to history
+    adata.uns["processing_history"].append(step_entry)
+
+
+def _check_processing_step(
+    adata: ad.AnnData,
+    step_name: str,
+) -> bool:
+    """
+    Check if a processing step has already been applied to the AnnData object.
+
+    This function searches adata.uns['processing_history'] to determine whether
+    a specific processing step has been previously applied.
+
+    Parameters
+    ----------
+    adata : ad.AnnData
+        AnnData object to check.
+    step_name : str
+        Name of the processing step to check for (e.g., 'quantile_normalization').
+
+    Returns
+    -------
+    bool
+        True if the step has been applied before, False otherwise.
+
+    Examples
+    --------
+    >>> if _check_processing_step(adata, 'arcsinh_transformation'):
+    ...     print("Already transformed!")
+    >>> else:
+    ...     arcsinh_transformation(adata, cofactor=5.0, inplace=True)
+    """
+    # If no processing history exists, step hasn't been applied
+    if "processing_history" not in adata.uns:
+        return False
+
+    # Check if step_name exists in any history entry
+    return any(step["step"] == step_name for step in adata.uns["processing_history"])
+
+
+def _get_processing_parameters(
+    adata: ad.AnnData,
+    step_name: str,
+) -> Optional[Dict[str, any]]:
+    """
+    Get the parameters used for a specific processing step.
+
+    This function retrieves the parameters that were used when a processing step
+    was previously applied. If the step was applied multiple times, returns the
+    parameters from the first occurrence.
+
+    Parameters
+    ----------
+    adata : ad.AnnData
+        AnnData object to query.
+    step_name : str
+        Name of the processing step to retrieve parameters for.
+
+    Returns
+    -------
+    dict or None
+        Dictionary of parameters if the step was found, None otherwise.
+
+    Examples
+    --------
+    >>> params = _get_processing_parameters(adata, 'quantile_normalization')
+    >>> if params:
+    ...     print(f"Min quantile: {params['min_quantile']}")
+    ...     print(f"Max quantile: {params['max_quantile']}")
+    """
+    # If no processing history exists, return None
+    if "processing_history" not in adata.uns:
+        return None
+
+    # Search for the step and return its parameters
+    for step in adata.uns["processing_history"]:
+        if step["step"] == step_name:
+            return step["parameters"]
+
+    # Step not found
+    return None
+
+
+def print_processing_history(adata: ad.AnnData) -> None:
+    """
+    Print a formatted summary of all processing steps applied to the AnnData object.
+
+    This function provides a human-readable display of the processing history,
+    including step names, timestamps, and parameters used for each transformation.
+
+    Parameters
+    ----------
+    adata : ad.AnnData
+        AnnData object to display processing history for.
+
+    Returns
+    -------
+    None
+        Prints formatted output to console.
+    """
+    if "processing_history" not in adata.uns:
+        print("No processing history found.")
+        return
+
+    if len(adata.uns["processing_history"]) == 0:
+        print("Processing history is empty.")
+        return
+
+    print("\nProcessing History:")
+    print("=" * 80)
+
+    for i, step in enumerate(adata.uns["processing_history"], 1):
+        print(f"\n{i}. {step['step']}")
+        print(f"   Timestamp: {step['timestamp']}")
+        print("   Parameters:")
+        for key, value in step["parameters"].items():
+            print(f"      {key}: {value}")
+
+    print("\n" + "=" * 80 + "\n")
+
+
+################################################################################
 # Combine CSV Data Files into AnnData Object
 ################################################################################
 def combine_csv_data(
@@ -774,6 +945,7 @@ def nucleus_signal_normalization(
     marker_nucleus: str = "DAPI",
     method: str = "median",
     inplace: bool = False,
+    skip_check: bool = False,
 ) -> Optional[ad.AnnData]:
     """
     Normalize single-cell expression data using nucleus marker signal intensity.
@@ -799,6 +971,10 @@ def nucleus_signal_normalization(
     inplace : bool, optional
         If True, modify the input AnnData object in place. If False, return a
         modified copy. Default is False.
+    skip_check : bool, optional
+        If True, skip the check for whether this normalization has already been
+        applied. Use with caution as applying normalization multiple times may
+        lead to incorrect results. Default is False.
 
     Returns
     -------
@@ -813,6 +989,8 @@ def nucleus_signal_normalization(
     ValueError
         If method is not "median" or "mean", if marker_nucleus is not found in
         adata.var_names, or if multiple markers with the same name exist.
+    RuntimeError
+        If the normalization has already been applied and skip_check is False.
 
     Examples
     --------
@@ -844,6 +1022,17 @@ def nucleus_signal_normalization(
     if not inplace:
         adata = adata.copy()
 
+    # Check if already processed
+    if not skip_check:
+        if _check_processing_step(adata, "nucleus_signal_normalization"):
+            prev_params = _get_processing_parameters(
+                adata, "nucleus_signal_normalization"
+            )
+            raise RuntimeError(
+                f"nucleus_signal_normalization has already been applied with "
+                f"parameters: {prev_params}. Set skip_check=True to bypass this check."
+            )
+
     data_ids = adata.obs[col_data_id].unique()
 
     if method not in ["median", "mean"]:
@@ -866,6 +1055,17 @@ def nucleus_signal_normalization(
         adata.X[mask, :] /= norm_factor
         adata.obs.loc[mask, "nucleus_norm_factor"] = norm_factor
 
+    # Record processing step
+    _record_processing_step(
+        adata,
+        "nucleus_signal_normalization",
+        {
+            "col_data_id": col_data_id,
+            "marker_nucleus": marker_nucleus,
+            "method": method,
+        },
+    )
+
     if not inplace:
         return adata
 
@@ -877,6 +1077,7 @@ def arcsinh_transformation(
     adata: ad.AnnData,
     cofactor: float = 1.0,
     inplace: bool = False,
+    skip_check: bool = False,
 ) -> Optional[ad.AnnData]:
     """
     Apply arcsinh (inverse hyperbolic sine) transformation to expression data.
@@ -899,12 +1100,21 @@ def arcsinh_transformation(
     inplace : bool, optional
         If True, modify the input AnnData object in place. If False, return a
         transformed copy. Default is False.
+    skip_check : bool, optional
+        If True, skip the check for whether this transformation has already been
+        applied. Use with caution as applying the same transformation multiple
+        times may lead to incorrect results. Default is False.
 
     Returns
     -------
     ad.AnnData or None
         If inplace=False, returns a transformed copy of the input AnnData object.
         If inplace=True, returns None and modifies the input object directly.
+
+    Raises
+    ------
+    RuntimeError
+        If the transformation has already been applied and skip_check is False.
 
     Examples
     --------
@@ -932,7 +1142,24 @@ def arcsinh_transformation(
     if not inplace:
         adata = adata.copy()
 
+    if not skip_check:
+        if _check_processing_step(adata, "arcsinh_transformation"):
+            prev_params = _get_processing_parameters(adata, "arcsinh_transformation")
+            raise RuntimeError(
+                f"arcsinh_transformation has already been applied with "
+                f"parameters: {prev_params}. Set skip_check=True to bypass this check."
+            )
+
     adata.X = np.arcsinh(adata.X / cofactor)
+
+    # Record processing step
+    _record_processing_step(
+        adata,
+        "arcsinh_transformation",
+        {
+            "cofactor": cofactor,
+        },
+    )
 
     if not inplace:
         return adata
@@ -1217,6 +1444,7 @@ def quantile_normalization(
     max_quantile: float = 0.99,
     equal_return: float = 0.0,
     inplace: bool = True,
+    skip_check: bool = False,
 ) -> Optional[ad.AnnData]:
     """
     Normalize marker expression to [0, 1] range using quantile-based clipping.
@@ -1244,6 +1472,10 @@ def quantile_normalization(
     inplace : bool, optional
         If True, modify the input AnnData object in place. If False, return a
         normalized copy. Default is True.
+    skip_check : bool, optional
+        If True, skip the check for whether this normalization has already been
+        applied. Use with caution as applying normalization multiple times may
+        lead to incorrect results. Default is False.
 
     Returns
     -------
@@ -1256,6 +1488,8 @@ def quantile_normalization(
     ------
     ValueError
         If min_quantile >= max_quantile, or if quantile values are outside [0, 1].
+    RuntimeError
+        If the normalization has already been applied and skip_check is False.
 
     Examples
     --------
@@ -1280,6 +1514,15 @@ def quantile_normalization(
     """
     if not inplace:
         adata = adata.copy()
+
+    # Check if already processed
+    if not skip_check:
+        if _check_processing_step(adata, "quantile_normalization"):
+            prev_params = _get_processing_parameters(adata, "quantile_normalization")
+            raise RuntimeError(
+                f"quantile_normalization has already been applied with "
+                f"parameters: {prev_params}. Set skip_check=True to bypass this check."
+            )
 
     # Validate quantile parameters
     if not (0 <= min_quantile <= 1):
@@ -1321,6 +1564,17 @@ def quantile_normalization(
         X_norm[:, i] = x_norm
 
     adata.X = X_norm
+
+    # Record processing step
+    _record_processing_step(
+        adata,
+        "quantile_normalization",
+        {
+            "min_quantile": min_quantile,
+            "max_quantile": max_quantile,
+            "equal_return": equal_return,
+        },
+    )
 
     if not inplace:
         return adata
