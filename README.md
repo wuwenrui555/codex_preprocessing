@@ -1,6 +1,25 @@
-# PyCODEX
+# CODEX Preprocessing
 
-Co-detection by indexing (CODEX) analysis using Python
+Co-detection by indexing (CODEX) analysis: data preprocessing for downstream analysis.
+
+## Installation
+
+```bash
+env_name=codex_preprocessing
+
+# Remove existing environment if exists
+conda deactivate && conda env remove -y -n $env_name
+
+# Create and activate a new conda environment
+mamba create -y -n $env_name python=3.10
+mamba activate $env_name
+```
+
+```bash
+pip install git+https://github.com/wuwenrui555/codex_preprocessing.git
+
+pip install git+https://github.com/wuwenrui555/codex_preprocessing.git@dev
+```
 
 ## Release Notes
 
