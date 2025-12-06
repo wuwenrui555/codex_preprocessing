@@ -1188,3 +1188,231 @@ def _downsample_cells(
     np.random.seed(seed)
     sampled_indices = np.random.choice(adata.n_obs, size=sample_size, replace=replace)
     return adata[sampled_indices]
+
+
+################################################################################
+# Quantile Normalization
+################################################################################
+def quantile_normalization(
+    adata: ad.AnnData,
+    min_quantile: float = 0.01,
+    max_quantile: float = 0.99,
+    equal_return: float = 0.0,
+    inplace: bool = True,
+) -> Optional[ad.AnnData]:
+    """
+    Normalize marker expression to [0, 1] range using quantile-based clipping.
+
+    This function performs marker-wise normalization by mapping values between
+    specified quantiles to the [0, 1] range. Values below the minimum quantile
+    are set to 0, and values above the maximum quantile are set to 1. This approach
+    is robust to outliers and useful for standardizing marker intensities across
+    different scales.
+
+    Parameters
+    ----------
+    adata : ad.AnnData
+        AnnData object containing single-cell expression data.
+    min_quantile : float, optional
+        Lower quantile threshold for normalization. Values below this quantile
+        are clipped to 0. Must be between 0 and 1. Default is 0.01 (1st percentile).
+    max_quantile : float, optional
+        Upper quantile threshold for normalization. Values above this quantile
+        are clipped to 1. Must be between 0 and 1 and greater than min_quantile.
+        Default is 0.99 (99th percentile).
+    equal_return : float, optional
+        Value to return when min and max quantiles are equal (i.e., all values
+        are identical). Default is 0.0.
+    inplace : bool, optional
+        If True, modify the input AnnData object in place. If False, return a
+        normalized copy. Default is True.
+
+    Returns
+    -------
+    ad.AnnData or None
+        If inplace=False, returns a normalized copy of the input AnnData object.
+        If inplace=True, returns None and modifies the input object directly.
+        All marker values are scaled to [0, 1] range.
+
+    Raises
+    ------
+    ValueError
+        If min_quantile >= max_quantile, or if quantile values are outside [0, 1].
+
+    Examples
+    --------
+    >>> # Basic usage with default 1st and 99th percentiles
+    >>> adata_norm = quantile_normalization(adata, inplace=False)
+
+    >>> # In-place normalization with custom quantiles
+    >>> quantile_normalization(
+    ...     adata,
+    ...     min_quantile=0.05,
+    ...     max_quantile=0.95,
+    ...     inplace=True
+    ... )
+    >>> print(adata[:, 'CD3'].X.min(), adata[:, 'CD3'].X.max())
+
+    Notes
+    -----
+    - Normalization is performed independently for each marker
+    - This method is robust to extreme outliers compared to min-max normalization
+    - If all values for a marker are identical, they are set to equal_return
+    - Values are linearly scaled between the quantile thresholds
+    """
+    if not inplace:
+        adata = adata.copy()
+
+    # Validate quantile parameters
+    if not (0 <= min_quantile <= 1):
+        raise ValueError(f"min_quantile must be between 0 and 1, got {min_quantile}")
+
+    if not (0 <= max_quantile <= 1):
+        raise ValueError(f"max_quantile must be between 0 and 1, got {max_quantile}")
+
+    if min_quantile >= max_quantile:
+        raise ValueError(
+            f"min_quantile ({min_quantile}) must be less than "
+            f"max_quantile ({max_quantile})"
+        )
+
+    # Normalize each marker
+    for marker in adata.var_names:
+        x = adata[:, marker].X.flatten()
+        x_min = np.quantile(x, min_quantile)
+        x_max = np.quantile(x, max_quantile)
+
+        # Handle edge case where min and max are equal
+        if x_min == x_max:
+            warnings.warn(
+                f"Marker '{marker}' has identical values at {min_quantile} and "
+                f"{max_quantile} quantiles. Setting all values to {equal_return}.",
+                UserWarning,
+            )
+            x_norm = np.full_like(x, equal_return, dtype=float)
+        else:
+            # Normalize values to [0, 1] range
+            x_norm = (x - x_min) / (x_max - x_min)
+            x_norm = np.clip(x_norm, 0, 1)
+
+        adata[:, marker].X = x_norm.reshape(-1, 1)
+
+    if not inplace:
+        return adata
+
+
+def plot_quantile_normalization(
+    adata: ad.AnnData,
+    marker_name: str,
+    quantiles: List[float] = None,
+    sample_size: Optional[int] = None,
+    seed: int = 81,
+    linewidth: Union[int, float] = 1,
+    figsize: Tuple[int, int] = (6, 4),
+    show: bool = True,
+) -> Tuple[plt.Figure, plt.Axes]:
+    """
+    Visualize quantile cutoff positions on marker distribution.
+
+    This function creates a density plot showing the distribution of a marker
+    with vertical lines indicating the positions of specified quantiles. This
+    is useful for selecting appropriate quantile thresholds for normalization.
+
+    Parameters
+    ----------
+    adata : ad.AnnData
+        AnnData object containing single-cell expression data.
+    marker_name : str
+        Name of the marker in adata.var_names to visualize.
+    quantiles : list[float], optional
+        List of quantile values (between 0 and 1) to display as vertical lines.
+        Default is [0.005, 0.01, 0.05, 0.95, 0.99, 0.995].
+    sample_size : int, optional
+        Number of cells to randomly sample for plotting. Useful for large datasets
+        to speed up visualization. If None, use all cells. Default is None.
+    seed : int, optional
+        Random seed for reproducible sampling when sample_size is specified.
+        Default is 81.
+    linewidth : int or float, optional
+        Width of the quantile threshold lines. Default is 1.
+    figsize : tuple[int, int], optional
+        Figure size as (width, height). Default is (6, 4).
+    show : bool, optional
+        If True, display the plot. If False, close the plot and return the
+        figure object. Default is True.
+
+    Returns
+    -------
+    tuple
+        (fig, ax) matplotlib figure and axes objects.
+
+    Raises
+    ------
+    ValueError
+        If marker_name is not found in adata.var_names or if multiple markers
+        with the same name exist.
+
+    Examples
+    --------
+    >>> # Basic usage to visualize default quantiles
+    >>> fig, ax = plot_quantile_normalization(adata, marker_name='CD3')
+
+    >>> # Custom quantiles with sampling for large dataset
+    >>> fig, ax = plot_quantile_normalization(
+    ...     adata,
+    ...     marker_name='CD4',
+    ...     quantiles=[0.01, 0.05, 0.5, 0.95, 0.99],
+    ...     sample_size=50000
+    ... )
+    >>> fig.savefig('cd4_quantiles.png', dpi=300, bbox_inches='tight')
+
+    Notes
+    -----
+    - Quantile lines show both the quantile value and the actual data value
+    - Sampling is recommended for datasets with >100,000 cells to improve performance
+    - Use this plot to identify appropriate quantile thresholds before normalization
+    """
+    if quantiles is None:
+        quantiles = [0.005, 0.01, 0.05, 0.95, 0.99, 0.995]
+
+    # Validate marker exists
+    if sum(adata.var_names == marker_name) == 0:
+        raise ValueError(f"{marker_name} not found in var_names")
+
+    if sum(adata.var_names == marker_name) > 1:
+        raise ValueError(f"Multiple {marker_name} found in var_names")
+
+    # Downsample if requested
+    if sample_size is not None and sample_size < adata.n_obs:
+        adata = _downsample_cells(adata, sample_size=sample_size, seed=seed)
+
+    # Extract marker values
+    x = adata[:, marker_name].X.flatten()
+
+    # Create plot
+    fig, ax = plt.subplots(figsize=figsize)
+    sns.kdeplot(x, ax=ax)
+
+    # Plot quantile lines
+    for quantile, color in zip(quantiles, sns.color_palette(n_colors=len(quantiles))):
+        v_quantile = np.quantile(x, quantile)
+        ax.axvline(
+            v_quantile,
+            color=color,
+            linestyle="--",
+            label=f"{quantile} ({v_quantile:.3g})",
+            linewidth=linewidth,
+        )
+
+    ax.set_xlabel(marker_name)
+    ax.set_ylabel("Density")
+    ax.legend(title="Quantiles (Values)", loc="best")
+
+    fig.tight_layout()
+
+    if show:
+        plt.show()
+    else:
+        plt.close(fig)
+
+    return fig, ax
