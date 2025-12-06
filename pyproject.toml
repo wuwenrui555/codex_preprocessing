@@ -1,22 +1,20 @@
 [project]
-name = "pycodex2"
+name = "codex_preprocessing"
 version = "0.1.1"
-description = "Co-detection by indexing (CODEX) analysis using Python, version 2"
+description = "Co-detection by indexing (CODEX) analysis: preprocessing"
 readme = "README.md"
 authors = [
     {name = "Wenrui Wu",email = "wuwenruiwwr@outlook.com"},
+    {name = "Huaying Qiu"},
     {name = "Zhangxin Zhao",email = "zhangxinzhao1220@gmail.com"},
 ]
 requires-python = ">=3.10"
 dependencies = [
     "anndata>=0.11.4",
-    "deepcell",
-    "geopandas>=1.1.1",
     "ipykernel>=7.0.1",
-    "rasterio>=1.4.3",
     "seaborn>=0.13.2",
     "tabulate>=0.9.0",
-    "zarr>=2.18.3",
+    "tqdm>=4.67.1",
 ]
 
 [build-system]
