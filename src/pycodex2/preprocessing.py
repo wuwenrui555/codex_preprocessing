@@ -1294,9 +1294,14 @@ def quantile_normalization(
             f"max_quantile ({max_quantile})"
         )
 
+    # Initialize normalized data matrix
+    X_norm = np.zeros_like(adata.X, dtype=float)
+
     # Normalize each marker
-    for marker in adata.var_names:
-        x = adata[:, marker].X.flatten()
+    for i, marker in enumerate(
+        tqdm(adata.var_names, desc="Quantile Normalization", bar_format=TQDM_FORMAT)
+    ):
+        x = adata.X[:, i].flatten()
         x_min = np.quantile(x, min_quantile)
         x_max = np.quantile(x, max_quantile)
 
@@ -1313,7 +1318,9 @@ def quantile_normalization(
             x_norm = (x - x_min) / (x_max - x_min)
             x_norm = np.clip(x_norm, 0, 1)
 
-        adata[:, marker].X = x_norm.reshape(-1, 1)
+        X_norm[:, i] = x_norm
+
+    adata.X = X_norm
 
     if not inplace:
         return adata
