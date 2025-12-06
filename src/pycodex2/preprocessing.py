@@ -547,6 +547,8 @@ class ExtremeCutoff:
         n_sigma: Union[int, float, None] = 3,
         n_sigma_lower: Union[int, float, None] = None,
         n_sigma_upper: Union[int, float, None] = None,
+        filter_lower: bool = True,
+        filter_upper: bool = True,
     ) -> Tuple[float, float, float, float, int, int, float, float]:
         """
         Calculate cutoff thresholds and filtering statistics.
@@ -561,6 +563,10 @@ class ExtremeCutoff:
             Number of standard deviations/MADs for lower cutoff. If None, uses n_sigma.
         n_sigma_upper : int or float, optional
             Number of standard deviations/MADs for upper cutoff. If None, uses n_sigma.
+        filter_lower : bool, optional
+            If True, calculate lower cutoff. Default is True.
+        filter_upper : bool, optional
+            If True, calculate upper cutoff. Default is True.
 
         Returns
         -------
@@ -594,14 +600,25 @@ class ExtremeCutoff:
             n_sigma_upper = n_sigma
 
         if method == "mean":
-            lower_log = self.log_mean - n_sigma_lower * self.log_std
-            upper_log = self.log_mean + n_sigma_upper * self.log_std
+            center = self.log_mean
+            spread = self.log_std
         elif method == "median":
-            lower_log = self.log_median - n_sigma_lower * self.log_mad
-            upper_log = self.log_median + n_sigma_upper * self.log_mad
+            center = self.log_median
+            spread = self.log_mad
 
-        lower = 10**lower_log - 1
-        upper = 10**upper_log - 1
+        if filter_lower:
+            lower_log = center - n_sigma_lower * spread
+            lower = 10**lower_log - 1
+        else:
+            lower = np.min(self.values)
+            lower_log = np.log10(lower + 1)
+
+        if filter_upper:
+            upper_log = center + n_sigma_upper * spread
+            upper = 10**upper_log - 1
+        else:
+            upper = np.max(self.values)
+            upper_log = np.log10(upper + 1)
 
         n_filtered_lower = np.sum(self.values < lower)
         n_filtered_upper = np.sum(self.values > upper)
@@ -852,6 +869,8 @@ class ExtremeCutoff:
         n_sigma: Union[int, float] = 3,
         n_sigma_lower: Union[int, float, None] = None,
         n_sigma_upper: Union[int, float, None] = None,
+        filter_lower: bool = True,
+        filter_upper: bool = True,
     ) -> np.ndarray:
         """
         Filter values based on calculated cutoff thresholds.
@@ -869,6 +888,10 @@ class ExtremeCutoff:
             This allows asymmetric filtering (e.g., 5 MADs below, 2.5 MADs above).
         n_sigma_upper : int or float, optional
             Number of standard deviations/MADs for upper cutoff. If None, uses n_sigma.
+        filter_lower : bool, optional
+            If True, apply lower cutoff filtering. Default is True.
+        filter_upper : bool, optional
+            If True, apply upper cutoff filtering. Default is True.
 
         Returns
         -------
@@ -906,6 +929,8 @@ class ExtremeCutoff:
             n_sigma=n_sigma,
             n_sigma_lower=n_sigma_lower,
             n_sigma_upper=n_sigma_upper,
+            filter_lower=filter_lower,
+            filter_upper=filter_upper,
         )
 
         result_df = pd.DataFrame(
