@@ -15,3 +15,6 @@ Co-detection by indexing (CODEX) analysis using Python
         - Downsampling strategy for efficient visualization
         - Comprehensive processing history tracking
     - Add `constants` module for storing constant values
+
+- v0.1.1 (2025-12-06):
+    - Update `ExtremeCutoff` class in `preprocessing` module: add options for not filtering lower or upper extreme values

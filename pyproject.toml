@@ -1,6 +1,6 @@
 [project]
 name = "pycodex2"
-version = "0.1.0"
+version = "0.1.1"
 description = "Co-detection by indexing (CODEX) analysis using Python, version 2"
 readme = "README.md"
 authors = [
