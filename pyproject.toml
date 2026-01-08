@@ -1,6 +1,6 @@
 [project]
 name = "codex_preprocessing"
-version = "0.1.1"
+version = "0.1.2"
 description = "Co-detection by indexing (CODEX) analysis: preprocessing"
 readme = "README.md"
 authors = [
