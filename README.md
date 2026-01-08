@@ -38,6 +38,9 @@ pip install git+https://github.com/wuwenrui555/codex_preprocessing.git@dev
 - v0.1.1 (2025-12-06):
     - Update `ExtremeCutoff` class in `preprocessing` module: add options for not filtering lower or upper extreme values
 
+- v0.1.2 (2026-01-07):
+    - Fix wrong package name in `__init__.py`.
+
 ## Tutorials
 
 - [Data Preprocessing](/notebook/data_preprocessing.ipynb)
